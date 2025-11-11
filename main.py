@@ -1,362 +1,193 @@
 import random
-from datetime import datetime
-import threading
 import time
-import sys
+import os
+from datetime import datetime
 
-# -------------------------------
-# 🧠 Data Structures
-# -------------------------------
+# --- CONFIGURATION ---
 
-# Player stats (Dict)
-player = {"name": "Hero", "hp": 100, "score": 0, "defeated": 0}
-
-# Monster pools by difficulty (List of Dicts)
-monsters = {
-    "easy": [
-        {"name": "Addagon", "hp": 25, "type": "Addition"},
-        {"name": "Subtrax", "hp": 25, "type": "Subtraction"},
-    ],
-    "medium": [
-        {"name": "Multiplex", "hp": 35, "type": "Multiplication"},
-        {"name": "Calcumancer", "hp": 30, "type": "Addition"},
-    ],
-    "hard": [
-        {"name": "Dividra", "hp": 50, "type": "Division"},
-        {"name": "Mathemorph", "hp": 45, "type": "All"},
-    ]
+levels = {
+    "Easy": {"ops": ["+", "-"], "range": (1, 20), "time": 6, "reward": 10, "penalty": 5},
+    "Medium": {"ops": ["+", "-", "*"], "range": (5, 50), "time": 5, "reward": 15, "penalty": 10},
+    "Hard": {"ops": ["+", "-", "*", "/"], "range": (10, 999), "time": 4, "reward": 20, "penalty": 15},
 }
 
-# Mode settings (Dict with Tuples for ranges)
-modes = {
-    "easy": {"ops": ["+", "-"], "time": 6, "range": (1, 20), "reward": 10, "penalty": 5},
-    "medium": {"ops": ["+", "-", "*"], "time": 5, "range": (5, 50), "reward": 15, "penalty": 10},
-    "hard": {"ops": ["+", "-", "*", "/"], "time": 4, "range": (10, 99), "reward": 20, "penalty": 15}
-}
+monsters = [
+    {"name": "Addagon", "base_hp": 30},
+    {"name": "Subtrax", "base_hp": 30},
+    {"name": "Multiplex", "base_hp": 40},
+    {"name": "Dividra", "base_hp": 50},
+    {"name": "Mathemorph", "base_hp": 60},
+]
 
-# Game tracking
-encountered = set()  # Set for unique monsters
-high_scores = []  # List with Tuples
-questions = []  # List of questions asked
-current_monster = None
-correct_answer = None
-start_time = None
-mode = "easy"
-level = 1
+# --- GLOBAL STATE ---
 
-# Timer control
-timer_running = False
-user_input = None
+player = {"hp": 100, "score": 0, "level": None}
+seen_monsters = set()
 
 
-# -------------------------------
-# 🎮 Game Functions
-# -------------------------------
+# --- HELPER FUNCTIONS ---
 
-def select_mode():
-    """Select difficulty mode with while loop."""
-    global mode
-    print("\n🎯 SELECT MODE:")
-    print("1. EASY (+ −) | 1-20 | 6s")
-    print("2. MEDIUM (+ − ×) | 5-50 | 5s")
-    print("3. HARD (+ − × ÷) | 10-99 | 4s")
+def clear_screen():
+    """Clears the console for a clean turn-based display."""
+    os.system('cls' if os.name == 'nt' else 'clear')
 
-    # While loop for validation
+
+def choose_level():
+    """Ask the player to choose a difficulty level."""
+    print("📘 Choose your battle difficulty:")
+    for i, lvl in enumerate(levels.keys(), start=1):
+        print(f"{i}. {lvl}")
+
     while True:
-        choice = input("\nChoice (1-3): ").strip()
-        if choice == "1":
-            mode = "easy"
-            break
-        elif choice == "2":
-            mode = "medium"
-            break
-        elif choice == "3":
-            mode = "hard"
-            break
-        else:
-            print("❌ Enter 1, 2, or 3")
+        try:
+            choice = int(input("\nEnter number: "))
+            level_name = list(levels.keys())[choice - 1]
+            print(f"\n⚔️ You chose {level_name} mode!\n")
+            return level_name
+        except (ValueError, IndexError):
+            print("❌ Invalid choice. Try again.")
 
 
-def start_game():
-    """Initialize game."""
-    global player, encountered, questions, level
+def generate_question(level):
+    """Generate a random math question based on the selected level."""
+    config = levels[level]
+    op = random.choice(config["ops"])
+    a, b = random.randint(*config["range"]), random.randint(*config["range"])
 
-    # String manipulation
-    name = input("\n🦸 Hero name: ").strip().capitalize()
-    player["name"] = name if name else "Hero"
-
-    select_mode()
-
-    # Reset state
-    player["hp"], player["score"], player["defeated"] = 100, 0, 0
-    encountered.clear()
-    questions.clear()
-    level = 1
-
-    print(f"\n⚔️ {player['name']} enters {mode.upper()} mode!\n")
-    spawn_monster()
-
-
-def spawn_monster():
-    """Spawn random monster."""
-    global current_monster, level
-
-    # Random selection from list
-    template = random.choice(monsters[mode])
-    current_monster = template.copy()
-    current_monster["hp"] = template["hp"] + (level * 10)
-
-    # Add to set
-    encountered.add(current_monster["name"])
-
-    # Level up every 3 monsters
-    if player["defeated"] > 0 and player["defeated"] % 3 == 0:
-        level += 1
-        print(f"⚡ LEVEL {level}! ⚡")
-
-    print(f"🚨 {current_monster['name']} appears!")
-    ask_question()
-
-
-def ask_question():
-    """Generate and ask math question."""
-    global correct_answer, start_time
-
-    config = modes[mode]
-    min_num, max_num = config["range"]
-
-    # Determine operation
-    if current_monster["type"] == "All":
-        op = random.choice(config["ops"])
-    elif current_monster["type"] == "Addition" and "+" in config["ops"]:
-        op = "+"
-    elif current_monster["type"] == "Subtraction" and "-" in config["ops"]:
-        op = "-"
-    elif current_monster["type"] == "Multiplication" and "*" in config["ops"]:
-        op = "*"
-    elif current_monster["type"] == "Division" and "/" in config["ops"]:
-        op = "/"
+    # Avoid division by zero and round division answers
+    if op == "/":
+        b = random.randint(1, config["range"][1])
+        correct = round(a / b, 2)
     else:
-        op = random.choice(config["ops"])
+        correct = eval(f"{a} {op} {b}")
 
-    # Generate numbers
-    a = random.randint(min_num, max_num)
-    b = random.randint(min_num, max_num)
+    return f"{a} {op} {b}", correct
 
-    # Adjust for operation type
-    if op == "-" and a < b:
-        a, b = b, a
-    elif op == "*":
-        a, b = random.randint(2, 12), random.randint(2, 12)
-    elif op == "/":
-        b = random.randint(2, 12)
-        a = b * random.randint(2, 12)  # Whole numbers
 
-    # Calculate answer
-    try:
-        correct_answer = round(eval(f"{a} {op} {b}"), 2)
-    except:
-        correct_answer = 0
+def display_stats():
+    """Display the player's current stats."""
+    print("📊 CURRENT STATUS")
+    print("-" * 30)
+    print(f"❤️  HP: {player['hp']}")
+    print(f"💯  Score: {player['score']}")
+    print(f"🎯  Difficulty: {player['level']}")
+    print("-" * 30)
+    print()
 
-    # Display and record
-    question = f"{a} {op} {b} = ?"
-    questions.append(question)
 
-    print(f"\n❤️ HP: {player['hp']} | ⭐ Score: {player['score']} | 💀 Defeated: {player['defeated']}")
-    print(f"🎯 {current_monster['name']} HP: {current_monster['hp']}")
-    print(f"❓ {question}")
+def ask_question(monster, level):
+    """Ask a math question, track timing, and apply rewards/damage."""
+    config = levels[level]
+    question, correct_answer = generate_question(level)
+
+    clear_screen()
+    display_stats()
+
+    print("-" * 50)
+    print(f"👾  A wild {monster['name']} appears!  (HP: {monster['hp']})")
+    print("-" * 50)
+    print(f"⏰  You have {config['time']} seconds to answer.")
+    print(f"🧮  Question: {question}\n")
 
     start_time = datetime.now()
-    get_answer_with_timer()
-
-
-def display_timer(time_limit):
-    """Display live countdown timer in separate thread."""
-    global timer_running
-    start = datetime.now()
-    last_second = time_limit
-
-    while timer_running:
-        elapsed = (datetime.now() - start).total_seconds()
-        remaining = max(0, time_limit - elapsed)
-        current_second = int(remaining)
-
-        # Only update display when second changes
-        if current_second != last_second:
-            # Clear the timer line and rewrite it
-            sys.stdout.write(f"\r⏰ Time left: {current_second}s  ")
-            sys.stdout.flush()
-            last_second = current_second
-
-        if remaining <= 0:
-            break
-
-        time.sleep(0.1)
-
-
-def get_answer_with_timer():
-    """Get answer with live timer."""
-    global timer_running, user_input
-
-    config = modes[mode]
-    time_limit = config["time"]
-
-    # Display initial timer
-    print(f"⏰ Time left: {int(time_limit)}s")
-
-    # Start timer in separate thread
-    timer_running = True
-    timer_thread = threading.Thread(target=display_timer, args=(time_limit,), daemon=True)
-    timer_thread.start()
 
     try:
-        # Get user input on separate line
-        user_input = input("Your answer: ")
-        timer_running = False  # Stop timer
-        print()  # New line after answer
-
+        # User input with time tracking
+        answer = input("💬  Your answer: ")
         elapsed = (datetime.now() - start_time).total_seconds()
-        answer = float(user_input)
 
-        # Conditional statements
-        if elapsed > time_limit:
-            print(f"⏰ TOO SLOW! -{config['penalty']} HP")
+        # Validate numeric input
+        try:
+            answer = float(answer)
+        except ValueError:
+            print(f"\n⚠️ Invalid input! You take {config['penalty']} damage!")
+            player["hp"] -= config["penalty"]
+            time.sleep(1.5)
+            return
+
+        print()
+        # Check time and correctness
+        if elapsed > config["time"]:
+            print(f"⏰ Too slow! You take {config['penalty']} damage!")
             player["hp"] -= config["penalty"]
         elif abs(answer - correct_answer) < 0.01:
-            damage = config["reward"] + level * 2
-            print(f"✅ CORRECT! {damage} damage dealt!")
-            current_monster["hp"] -= damage
+            print(f"✅ Correct! You dealt {config['reward']} damage to {monster['name']}!")
+            monster["hp"] -= config["reward"]
             player["score"] += config["reward"]
         else:
-            print(f"❌ WRONG! Answer: {correct_answer}. -{config['penalty']} HP")
+            print(f"❌ Wrong! The correct answer was {correct_answer}. You take {config['penalty']} damage!")
             player["hp"] -= config["penalty"]
 
-        check_state()
+        print()
+        time.sleep(1.5)
 
-    except ValueError:
-        timer_running = False
-        print("\n⚠️ Invalid input!")
-        ask_question()
     except KeyboardInterrupt:
-        timer_running = False
-        print("\n\n🚪 Exiting...")
-        save_score()
-        end_game()
+        print("\n🚪 Exiting the battle...")
+        exit()
     except Exception as e:
-        timer_running = False
-        print(f"\n⚠️ Error: {e}")
-        ask_question()
+        print(f"\n⚠️ Unexpected error: {e}")
+        time.sleep(1.5)
 
 
-def check_state():
-    """Check win/loss conditions."""
-    # If-elif-else statements
-    if player["hp"] <= 0:
-        print(f"💀 {player['name']} defeated!")
-        save_score()
-        end_game()
-    elif current_monster["hp"] <= 0:
-        player["defeated"] += 1
-        player["hp"] = min(100, player["hp"] + 15)
-        player["score"] += 20 + level * 5
-        print(f"🎉 {current_monster['name']} defeated! +15 HP!")
-        spawn_monster()
-    else:
-        ask_question()
-
-
-def end_game():
-    """Display final stats and high scores."""
-    print("\n" + "=" * 50)
-    print("🎮 GAME OVER")
-    print("=" * 50)
-    print(f"\n📊 {player['name']}'s Stats:")
-    print(f"🏆 Score: {player['score']}")
-    print(f"💀 Monsters: {player['defeated']}")
-    print(f"❓ Questions: {len(questions)}")
-    print(f"⚔️ Level: {level}")
-
-    # Show unique monsters (Set)
-    if encountered:
-        print(f"\n👾 Fought: {', '.join(sorted(encountered))}")
-
-    # Show sample questions (List slicing)
-    if questions:
-        print(f"\n📝 First 3 questions:")
-        for i, q in enumerate(questions[:3], 1):
-            print(f"   {i}. {q}")
-
-    show_high_scores()
-
-    # Play again loop
-    if input("\n🎮 Play again? (y/n): ").lower() == 'y':
-        start_game()
-    else:
-        print("👋 Thanks for playing!\n")
-
-
-def save_score():
-    """Save score using Tuple."""
-    # Tuple: (name, score, time)
-    entry = (player["name"], player["score"], datetime.now().strftime("%H:%M"))
-    high_scores.append(entry)
-
-    # Filter with lambda
-    good = list(filter(lambda x: x[1] >= 50, high_scores))
-    print(f"\n💾 Saved! Scores ≥50: {len(good)}")
-
-
-def show_high_scores():
-    """Display top 5 scores using map()."""
-    if high_scores:
-        print("\n🏆 TOP 5 HIGH SCORES:")
-        # Sort and slice
-        top = sorted(high_scores, key=lambda x: x[1], reverse=True)[:5]
-        # Map with lambda
-        formatted = list(map(lambda x: f"{x[0]} - {x[1]} pts ({x[2]})", top))
-        # For loop with enumerate
-        for i, score in enumerate(formatted, 1):
-            print(f"   {i}. {score}")
-    else:
-        print("\n🏆 No scores yet!")
-
+# --- MAIN GAME LOOP ---
 
 def main():
-    """Main menu with while loop."""
-    print("=" * 50)
-    print("⚔️  MATH BATTLE ARENA ⚔️".center(50))
-    print("=" * 50)
-    print("\nDefeat monsters by solving math!")
+    clear_screen()
+    print("🎮 WELCOME TO MATH BATTLE!")
+    print("Defeat monsters by solving math problems before time runs out!\n")
 
-    # While loop
-    while True:
-        print("\n📋 MENU:")
-        print("1. Start Game")
-        print("2. High Scores")
-        print("3. Exit")
+    level = choose_level()
+    player["level"] = level
 
-        try:
-            choice = input("\nOption (1-3): ").strip()
+    # Main battle loop
+    while player["hp"] > 0:
+        monster = random.choice(monsters)
+        seen_monsters.add(monster["name"])
+        monster["hp"] = monster["base_hp"] + levels[level]["reward"]
 
-            if choice == "1":
-                start_game()
-            elif choice == "2":
-                show_high_scores()
-            elif choice == "3":
-                print("\n👋 Goodbye!\n")
-                break
-            else:
-                print("❌ Enter 1-3")
-        except KeyboardInterrupt:
-            print("\n\n👋 Goodbye!\n")
+        # Battle this monster until one side falls
+        while monster["hp"] > 0 and player["hp"] > 0:
+            ask_question(monster, level)
+
+        if player["hp"] <= 0:
+            clear_screen()
+            print("💀 You were defeated...")
             break
-        except Exception as e:
-            print(f"❌ Error: {e}")
+
+        print(f"🎉 You defeated {monster['name']}!\n")
+        time.sleep(1.5)
+
+    # --- GAME OVER SUMMARY ---
+    clear_screen()
+    print("🏁 GAME OVER!")
+    print(f"Final Score: {player['score']}")
+    print(f"Monsters Encountered: {', '.join(seen_monsters)}")
+
+    # --- Demonstrate map(), filter(), and lambda usage ---
+
+    # 1️⃣ Use filter() to find which monsters were encountered
+    encountered_monsters = list(filter(lambda m: m["name"] in seen_monsters, monsters))
+
+    # 2️⃣ Use map() + lambda to get names of encountered monsters
+    monster_names = list(map(lambda m: m["name"], encountered_monsters))
+
+    # 3️⃣ Use another lambda in sum/map to calculate total monster HP encountered
+    total_hp_encountered = sum(map(lambda m: m["base_hp"], encountered_monsters))
+
+    print(f"\n👹 Monsters you fought: {', '.join(monster_names)}")
+    print(f"💪 Total Base HP of encountered monsters: {total_hp_encountered}")
+
+    # 4️⃣ Use filter() + lambda to show only strong monsters (base_hp > 40)
+    strong_monsters = list(filter(lambda m: m["base_hp"] > 40, encountered_monsters))
+    if strong_monsters:
+        strong_names = ', '.join(map(lambda m: m['name'], strong_monsters))
+        print(f"🔥 Tough Monsters (HP > 40): {strong_names}")
+
+    # 5️⃣ Existing map() demo still valid
+    print(f"\n🔢 Score doubled preview (map demo): {list(map(lambda x: x * 2, [player['score']]))}")
+    print("\nThanks for playing MATH BATTLE! ⚔️")
 
 
-# -------------------------------
-# 🚀 Start
-# -------------------------------
-
+# --- START THE GAME ---
 if __name__ == "__main__":
     main()
