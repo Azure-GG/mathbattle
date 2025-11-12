@@ -27,7 +27,7 @@ def clear_screen():
 def hp_bar(current_hp, max_hp, bar_length=20):
     current_hp = max(0, current_hp)
     filled_length = int(bar_length * current_hp // max_hp)
-    bar = "#" * filled_length + "-" * (bar_length - filled_length)
+    bar = "#" * filled_length + " " * (bar_length - filled_length)
     percent = int((current_hp / max_hp) * 100)
     return f"[{bar}] ({percent}%)"
 
